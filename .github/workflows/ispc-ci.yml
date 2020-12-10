@@ -1,0 +1,129 @@
+name: ISPC CI workflow
+
+on:
+  schedule:
+    - cron:  '*/10 * * * *'
+  push:
+  pull_request:
+
+env:
+  TARGETS_SMOKE: '["sse2-i32x4", "sse2-i32x8"]'
+  TARGETS_FULL:  '["sse2-i32x4", "sse2-i32x8",
+                   "sse4-i8x16", "sse4-i16x8", "sse4-i32x4", "sse4-i32x8",
+                   "avx1-i32x4", "avx1-i32x8", "avx1-i32x16", "avx1-i64x4",
+                   "avx2-i8x32", "avx2-i16x16", "avx2-i32x4", "avx2-i32x8", "avx2-i32x16", "avx2-i64x4",
+                   "avx512knl-i32x16",
+                   "avx512skx-i32x8", "avx512skx-i32x16", "avx512skx-i8x64", "avx512skx-i16x32"]'
+
+jobs:
+  define-flow:
+    runs-on: ubuntu-latest
+    outputs:
+      tests_matrix_targets: ${{ steps.set-tests-matrix.outputs.matrix }}
+      flow_type: ${{ steps.set-flow-type.outputs.type }}
+    env:
+      REF_NAME: ${{ github.ref }}
+      EVENT_NAME: ${{ github.event_name }}
+      # define rule when to run full set of tests
+      # run only if branch has keyword or run on master branch (cron)
+      RUN_FULL: ${{ contains(github.ref, 'test_nightly') || (github.ref == 'refs/heads/master' && github.event_name == '') }}
+      # define rule when to run smoke tests
+      RUN_SMOKE: ${{ github.event_name == 'push' }}
+    steps:
+    - id: set-tests-matrix
+      run: |
+         # set tests matrix depends on flow
+         $RUN_SMOKE && echo "::set-output name=matrix::${TARGETS_SMOKE}" || true
+         $RUN_FULL &&  echo "::set-output name=matrix::${TARGETS_FULL}" || true
+    - id: set-flow-type
+      run: |
+         $RUN_SMOKE && echo "::set-output name=type::smoke" || true
+         $RUN_FULL &&  echo "::set-output name=type::full" || true
+
+  check-format:
+    if: ${{ github.event_name == 'push' || github.event_name == 'pull_request' }}
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+      with:
+        submodules: true
+
+    - name: Install dependencies
+      run: |
+        echo "APT::Acquire::Retries \"3\";" | sudo tee -a /etc/apt/apt.conf.d/80-retries
+        sudo apt-get update
+        sudo apt-get install -y clang-format-10 clang-10
+        sudo ln -sf /usr/bin/clang-10 /usr/bin/clang
+        sudo ln -sf /usr/bin/clang-format-10 /usr/bin/clang-format
+
+    - name: Check format
+      run: |
+        ./check_format.sh
+
+  linux-build-llvm10:
+    needs: [define-flow]
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+      with:
+        submodules: true
+
+  linux-build-llvm11:
+    needs: [define-flow]
+    if: ${{ needs.define-flow.outputs.flow_type == 'full' }}
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v2
+      with:
+        submodules: true
+
+  linux-build-llvm-trunk:
+    needs: [define-flow]
+    if: ${{ needs.define-flow.outputs.flow_type == 'full' }}
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v2
+      with:
+        submodules: true
+
+  linux-test-llvm10:
+    needs: [define-flow, linux-build-llvm10]
+    runs-on: ubuntu-latest
+    continue-on-error: false
+    strategy:
+      fail-fast: false
+      matrix:
+        target: ${{fromJson(needs.define-flow.outputs.tests_matrix_targets)}}
+    steps:
+    - name: Running tests
+      run: |
+        echo "${{ matrix.target }}"
+
+  linux-test-llvm11:
+    needs: [define-flow, linux-build-llvm11]
+    runs-on: ubuntu-latest
+    continue-on-error: false
+    strategy:
+      fail-fast: false
+      matrix:
+        target: ${{fromJson(needs.define-flow.outputs.tests_matrix_targets)}}
+    steps:
+    - name: Running tests
+      run: |
+        echo "${{ matrix.target }}"
+
+  linux-test-llvm-trunk:
+    needs: [define-flow, linux-build-llvm-trunk]
+    runs-on: ubuntu-latest
+    continue-on-error: false
+    strategy:
+      fail-fast: false
+      matrix:
+        target: ${{fromJson(needs.define-flow.outputs.tests_matrix_targets)}}
+    steps:
+    - name: Running tests
+      run: |
+        echo "${{ matrix.target }}"
+

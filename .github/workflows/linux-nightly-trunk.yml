@@ -6,9 +6,9 @@ name: Nightly Linux tests / LLVM trunk
 on:
   schedule:
     - cron:  '0 7 * * *'
-  push:
-    branches:
-      - '**test_nightly**'
+      #push:
+      #branches:
+      #- '**test_nightly**'
   workflow_dispatch:
 
 env:
