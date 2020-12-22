@@ -26,7 +26,7 @@ jobs:
       EVENT_NAME: ${{ github.event_name }}
       # define rule when to run full set of tests
       # run only if branch has keyword or run on master branch (cron)
-      RUN_FULL: ${{ contains(github.ref, 'test_nightly') || (github.ref == 'refs/heads/master' && github.event_name == '') }}
+      RUN_FULL: ${{ contains(github.ref, 'test_nightly') || (github.ref == 'refs/heads/master' && github.event_name == 'schedule') }}
       # define rule when to run smoke tests
       RUN_SMOKE: ${{ github.event_name == 'push' }}
     steps:
