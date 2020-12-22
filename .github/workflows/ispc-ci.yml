@@ -6,7 +6,12 @@ on:
     - cron:  '0 7 * * *'
   push:
   pull_request:
-
+  workflow_dispatch:
+    inputs:
+      flow_type:
+        description: 'Workflow flow type'
+        required: true
+        default: 'full'
 env:
   SDE_TAR_NAME: sde-external-8.59.0-2020-10-05-lin
   LLVM_REPO: https://github.com/dbabokin/llvm-project
@@ -30,11 +35,13 @@ jobs:
       EVENT_NAME: ${{ github.event_name }}
 
       # define rule when to run full flow
-      # run only if branch has keyword or run on master branch (cron)
-      RUN_FULL: ${{ contains(github.ref, 'test_nightly') || (github.ref == 'refs/heads/master' && github.event_name == 'schedule') }}
+      RUN_FULL: ${{ contains(github.ref, 'test_nightly') ||
+                    (github.ref == 'refs/heads/master' && github.event_name == 'schedule') ||
+                    (github.event_name == 'workflow_dispatch' && github.event.inputs.flow_type == 'full') }}
 
       # define rule when to run smoke flow
-      RUN_SMOKE: ${{ github.event_name == 'push' }}
+      RUN_SMOKE: ${{ github.event_name == 'push' ||
+                    (github.event_name == 'workflow_dispatch' && github.event.inputs.flow_type == 'smoke') }}
     steps:
     - id: set-tests-matrix
       run: |
