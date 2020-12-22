@@ -2,12 +2,15 @@ name: ISPC CI workflow
 
 on:
   schedule:
-    - cron:  '*/10 * * * *'
+    # Run daily - test sse2-avx512 targets @ -O0/-O1/-O2
+    - cron:  '0 7 * * *'
   push:
   pull_request:
 
 env:
-  TARGETS_SMOKE: '["sse2-i32x4", "sse2-i32x8"]'
+  SDE_TAR_NAME: sde-external-8.59.0-2020-10-05-lin
+  LLVM_REPO: https://github.com/dbabokin/llvm-project
+  TARGETS_SMOKE: '["sse2-i32x4"]'
   TARGETS_FULL:  '["sse2-i32x4", "sse2-i32x8",
                    "sse4-i8x16", "sse4-i16x8", "sse4-i32x4", "sse4-i32x8",
                    "avx1-i32x4", "avx1-i32x8", "avx1-i32x16", "avx1-i64x4",
@@ -22,12 +25,15 @@ jobs:
       tests_matrix_targets: ${{ steps.set-tests-matrix.outputs.matrix }}
       flow_type: ${{ steps.set-flow-type.outputs.type }}
     env:
+      # for debug purposes
       REF_NAME: ${{ github.ref }}
       EVENT_NAME: ${{ github.event_name }}
-      # define rule when to run full set of tests
+
+      # define rule when to run full flow
       # run only if branch has keyword or run on master branch (cron)
       RUN_FULL: ${{ contains(github.ref, 'test_nightly') || (github.ref == 'refs/heads/master' && github.event_name == 'schedule') }}
-      # define rule when to run smoke tests
+
+      # define rule when to run smoke flow
       RUN_SMOKE: ${{ github.event_name == 'push' }}
     steps:
     - id: set-tests-matrix
@@ -60,36 +66,158 @@ jobs:
       run: |
         ./check_format.sh
 
-  linux-build-llvm10:
-    needs: [define-flow]
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v2
-      with:
-        submodules: true
-
-  linux-build-llvm11:
-    needs: [define-flow]
-    if: ${{ needs.define-flow.outputs.flow_type == 'full' }}
-    runs-on: ubuntu-latest
-
-    steps:
-    - uses: actions/checkout@v2
-      with:
-        submodules: true
-
+  # Building LLVM in docker, as using native Ubuntu 16.04 github-hosted image contains newer-than-expected libs and
+  # makes the resulting build not usable on other Ubuntu 16.04 images.
   linux-build-llvm-trunk:
     needs: [define-flow]
     if: ${{ needs.define-flow.outputs.flow_type == 'full' }}
     runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+      with:
+        submodules: true
+
+    - name: Check environment
+      run: |
+        cat /proc/cpuinfo
+
+    - name: Build LLVM
+      run: |
+        cd docker/ubuntu/llvm_build
+        docker build --tag ispc/ubuntu16.04 --build-arg REPO=$GITHUB_REPOSITORY --build-arg SHA=$GITHUB_SHA --build-arg LLVM_VERSION=trunk .
+
+    - name: Pack LLVM
+      run: |
+        cd docker/ubuntu/llvm_build
+        docker run ispc/ubuntu16.04
+        export CONTAINER=`docker ps --all |head -2 |tail -1 |awk '//{print $1}'`
+        sudo docker cp $CONTAINER:/usr/local/src/llvm/bin-trunk .
+        tar cJvf llvm-trunk-ubuntu16.04-Release+Asserts-x86.arm.wasm.tar.xz bin-trunk
+
+    - name: Upload package
+      uses: actions/upload-artifact@v2
+      with:
+        name: llvm_trunk_linux
+        path: docker/ubuntu/llvm_build/llvm-trunk-ubuntu16.04-Release+Asserts-x86.arm.wasm.tar.xz
+
+  linux-build-ispc-llvm10:
+    needs: [define-flow]
+    if: ${{ needs.define-flow.outputs.flow_type == 'full' }}
+    runs-on: ubuntu-latest
+    env:
+      LLVM_VERSION: "10.0"
+      LLVM_TAR: llvm-10.0.1-ubuntu16.04-Release+Asserts-x86.arm.wasm.tar.xz
 
     steps:
     - uses: actions/checkout@v2
       with:
         submodules: true
 
+    - name: Install dependencies
+      run: |
+        .github/workflows/scripts/install-build-deps.sh
+
+    - name: Check environment
+      run: |
+        ./check_env.py
+        which -a clang
+        cat /proc/cpuinfo
+
+    - name: Build package
+      run: |
+        .github/workflows/scripts/build-ispc.sh
+
+    - name: Sanity testing (make check-all, make test)
+      run: |
+        .github/workflows/scripts/check-ispc.sh
+
+    - name: Upload package
+      uses: actions/upload-artifact@v2
+      with:
+        name: ispc_llvm10_linux
+        path: build/ispc-trunk-linux.tar.gz
+
+
+  linux-build-ispc-llvm11:
+    needs: [define-flow]
+    runs-on: ubuntu-latest
+    env:
+      LLVM_VERSION: "11.0"
+      LLVM_TAR: llvm-11.0.0-ubuntu16.04-Release+Asserts-x86.arm.wasm.tar.xz
+
+    steps:
+    - uses: actions/checkout@v2
+      with:
+        submodules: true
+
+    - name: Install dependencies
+      run: |
+        .github/workflows/scripts/install-build-deps.sh
+
+    - name: Check environment
+      run: |
+        ./check_env.py
+        which -a clang
+        cat /proc/cpuinfo
+
+    - name: Build package
+      run: |
+        .github/workflows/scripts/build-ispc.sh
+
+    - name: Sanity testing (make check-all, make test)
+      run: |
+        .github/workflows/scripts/check-ispc.sh
+
+    - name: Upload package
+      uses: actions/upload-artifact@v2
+      with:
+        name: ispc_llvm11_linux
+        path: build/ispc-trunk-linux.tar.gz
+
+  linux-build-ispc-llvm-trunk:
+    needs: [define-flow, linux-build-llvm-trunk]
+    if: ${{ needs.define-flow.outputs.flow_type == 'full' }}
+    runs-on: ubuntu-latest
+    env:
+      LLVM_VERSION: "trunk"
+      LLVM_TAR: llvm-trunk-ubuntu16.04-Release+Asserts-x86.arm.wasm.tar.xz
+
+    steps:
+    - uses: actions/checkout@v2
+      with:
+        submodules: true
+
+    - name: Download package
+      uses: actions/download-artifact@v2
+      with:
+        name: llvm_trunk_linux
+
+    - name: Install dependencies
+      run: |
+        .github/workflows/scripts/install-build-deps.sh
+
+    - name: Check environment
+      run: |
+        ./check_env.py
+        which -a clang
+        cat /proc/cpuinfo
+
+    - name: Build package
+      run: |
+        .github/workflows/scripts/build-ispc.sh
+
+    - name: Sanity testing (make check-all, make test)
+      run: |
+        .github/workflows/scripts/check-ispc.sh
+
+    - name: Upload package
+      uses: actions/upload-artifact@v2
+      with:
+        name: ispc_llvm11_linux
+        path: build/ispc-trunk-linux.tar.gz
+
   linux-test-llvm10:
-    needs: [define-flow, linux-build-llvm10]
+    needs: [define-flow, linux-build-ispc-llvm10]
     runs-on: ubuntu-latest
     continue-on-error: false
     strategy:
@@ -97,12 +225,41 @@ jobs:
       matrix:
         target: ${{fromJson(needs.define-flow.outputs.tests_matrix_targets)}}
     steps:
+    - uses: actions/checkout@v2
+    - name: Download package
+      uses: actions/download-artifact@v2
+      with:
+        name: ispc_llvm10_linux
+
+    - name: Install dependencies and unpack artifacts
+      run: |
+        .github/workflows/scripts/install-test-deps.sh
+
+    - name: Check environment
+      run: |
+        cat /proc/cpuinfo
+
     - name: Running tests
       run: |
-        echo "${{ matrix.target }}"
+        echo PATH=$PATH
+        ./alloy.py -r --only="stability current -O0 -O1 -O2" --only-targets="${{ matrix.target }}" --time --update-errors=FP
+
+    - name: Upload fail_db.txt
+      uses: actions/upload-artifact@v2
+      if: failure()
+      with:
+        name: fail_db.${{matrix.target}}.txt
+        path: fail_db.txt
+
+    - name: Check
+      run: |
+        # Print fails to the log.
+        git diff
+        # Exit with error code is there are fails.
+        [ -z "`git diff`" ]
 
   linux-test-llvm11:
-    needs: [define-flow, linux-build-llvm11]
+    needs: [define-flow, linux-build-ispc-llvm11]
     runs-on: ubuntu-latest
     continue-on-error: false
     strategy:
@@ -110,12 +267,41 @@ jobs:
       matrix:
         target: ${{fromJson(needs.define-flow.outputs.tests_matrix_targets)}}
     steps:
+    - uses: actions/checkout@v2
+    - name: Download package
+      uses: actions/download-artifact@v2
+      with:
+        name: ispc_llvm11_linux
+
+    - name: Install dependencies and unpack artifacts
+      run: |
+        .github/workflows/scripts/install-test-deps.sh
+
+    - name: Check environment
+      run: |
+        cat /proc/cpuinfo
+
     - name: Running tests
       run: |
-        echo "${{ matrix.target }}"
+        echo PATH=$PATH
+        ./alloy.py -r --only="stability current -O0 -O1 -O2" --only-targets="${{ matrix.target }}" --time --update-errors=FP
+
+    - name: Upload fail_db.txt
+      uses: actions/upload-artifact@v2
+      if: failure()
+      with:
+        name: fail_db.${{matrix.target}}.txt
+        path: fail_db.txt
+
+    - name: Check
+      run: |
+        # Print fails to the log.
+        git diff
+        # Exit with error code is there are fails.
+        [ -z "`git diff`" ]
 
   linux-test-llvm-trunk:
-    needs: [define-flow, linux-build-llvm-trunk]
+    needs: [define-flow, linux-build-ispc-llvm-trunk]
     runs-on: ubuntu-latest
     continue-on-error: false
     strategy:
@@ -123,7 +309,36 @@ jobs:
       matrix:
         target: ${{fromJson(needs.define-flow.outputs.tests_matrix_targets)}}
     steps:
+    - uses: actions/checkout@v2
+    - name: Download package
+      uses: actions/download-artifact@v2
+      with:
+        name: ispc_trunk_linux
+
+    - name: Install dependencies and unpack artifacts
+      run: |
+        .github/workflows/scripts/install-test-deps.sh
+
+    - name: Check environment
+      run: |
+        cat /proc/cpuinfo
+
     - name: Running tests
       run: |
-        echo "${{ matrix.target }}"
+        echo PATH=$PATH
+        ./alloy.py -r --only="stability current -O0 -O1 -O2" --only-targets="${{ matrix.target }}" --time --update-errors=FP
+
+    - name: Upload fail_db.txt
+      uses: actions/upload-artifact@v2
+      if: failure()
+      with:
+        name: fail_db.${{matrix.target}}.txt
+        path: fail_db.txt
+
+    - name: Check
+      run: |
+        # Print fails to the log.
+        git diff
+        # Exit with error code is there are fails.
+        [ -z "`git diff`" ]
 
