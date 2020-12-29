@@ -76,7 +76,7 @@
 #define ARRAY_SIZE 256
 
 #ifdef ISPC_IS_WINDOWS64
-#define CALLINGCONV __vectorcall
+#define CALLINGCONV //__vectorcall
 #else
 #define CALLINGCONV
 #endif

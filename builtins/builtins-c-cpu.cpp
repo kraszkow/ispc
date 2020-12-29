@@ -69,8 +69,8 @@
 #include <unistd.h>
 
 // Just for the reference: these lines are eventually included from unistd.h
-// #define _SC_NPROCESSORS_ONLN 58
-// long sysconf(int);
+//#define _SC_NPROCESSORS_ONLN 58
+//long sysconf(int);
 #endif // !_MSC_VER
 
 #endif // !WASM

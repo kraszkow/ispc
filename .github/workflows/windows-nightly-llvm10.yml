@@ -1,0 +1,116 @@
+# Nightly Linux run.
+
+name: Nightly Win tests / LLVM 10.0
+
+on:
+  push:
+
+env:
+  LLVM_HOME: "C:\\projects\\llvm"
+
+jobs:
+  win-build-ispc-llvm10:
+    runs-on: windows-latest
+    env:
+      LLVM_VERSION: "10.0"
+      LLVM_TAR: llvm-10.0.1-win.vs2019-Release+Asserts-x86.arm.wasm.zip
+      CROSS_TOOLS_GNUWIN32: "C:\\projects\\cross\\gnuwin32"
+      BUILD_TYPE: "Release"
+
+    steps:
+    - uses: actions/checkout@v2
+      with:
+        submodules: true
+
+    - name: Add msbuild to PATH
+      uses: microsoft/setup-msbuild@v1.0.2
+
+    - name: Install dependencies
+      run: |
+        choco install --no-progress winflexbison3 wget 7zip cygwin cyg-get
+
+        # Install M4 exec and put it into PATH
+        cyg-get m4
+        echo "C:\tools\cygwin\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+        # Download and unpack llvm
+        mkdir ${env:LLVM_HOME}
+        cd ${env:LLVM_HOME}
+        wget -q --retry-connrefused --waitretry=5 --read-timeout=20 --timeout=15 -t 5 https://github.com/dbabokin/llvm-project/releases/download/llvm-${env:LLVM_VERSION}-ispc-dev/${env:LLVM_TAR}
+        7z.exe x -t7z ${env:LLVM_TAR}
+        echo "${env:LLVM_HOME}\bin-${env:LLVM_VERSION}\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+        # Download and unpack gnuwin32
+        mkdir ${env:CROSS_TOOLS_GNUWIN32}
+        cd ${env:CROSS_TOOLS_GNUWIN32}
+        wget -q --retry-connrefused --waitretry=5 --read-timeout=20 --timeout=15 -t 5 -O libgw32c-0.4-lib.zip https://sourceforge.net/projects/gnuwin32/files/libgw32c/0.4/libgw32c-0.4-lib.zip/download
+        7z.exe x libgw32c-0.4-lib.zip
+
+    - name: Build package
+      run: |
+        cmake -B build -DISPC_PREPARE_PACKAGE=ON -DISPC_CROSS=ON -DISPC_INCLUDE_BENCHMARKS=ON -DCMAKE_BUILD_TYPE="${env:BUILD_TYPE}" -DISPC_GNUWIN32_PATH="${env:CROSS_TOOLS_GNUWIN32}"
+        cmake --build build --target package -j4 --config ${env:BUILD_TYPE}
+
+    - name: Sanity testing (make check-all, make test)
+      run: |
+        $env:Path += ";$pwd\build\bin\Release"
+        check_isa.exe
+        ispc.exe --support-matrix
+        cmake --build build --target check-all --config ${env:BUILD_TYPE}
+
+    - name: Upload package
+      uses: actions/upload-artifact@v2
+      with:
+        name: ispc_llvm_trunk_linux
+        path: build/ispc-trunk-windows.msi
+
+  win-test-llvm10:
+    needs: [win-build-ispc-llvm10]
+    runs-on: windows-latest
+    continue-on-error: false
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x86, x86-64]
+        target: [ avx2-i32x4 ]
+
+    steps:
+    - uses: actions/checkout@v2
+    - name: Download package
+      uses: actions/download-artifact@v2
+      with:
+        name: ispc_llvm_trunk_linux
+
+    - name: Install dependencies
+      run: |
+        $msiexecArgs = @(
+            "/i",
+            "$pwd\ispc-trunk-windows.msi",
+            "/L*V",
+            "$pwd\install.log",
+            "/qn",
+            "INSTALL_ROOT=$pwd"
+        )
+        Start-Process -FilePath msiexec -ArgumentList $msiexecArgs -NoNewWindow -Wait
+        #cat install.log
+        echo "$pwd\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+    - name: Running tests
+      run: |
+        $env:ISPC_HOME = "$pwd"
+        .github/workflows/scripts/load-vs-env.ps1 "${{ matrix.arch }}"
+        python .\alloy.py -r --only="stability ${{ matrix.arch }} current -O2" --only-targets="${{ matrix.target }}" --time --update-errors=FP
+
+
+    - name: Upload fail_db.txt
+      uses: actions/upload-artifact@v2
+      if: failure()
+      with:
+        name: fail_db.${{matrix.arch}}.${{matrix.target}}.txt
+        path: fail_db.txt
+
+    - name: Check
+      run: |
+        # Print fails to the log.
+        git diff
+
