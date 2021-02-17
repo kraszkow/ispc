@@ -171,8 +171,15 @@ def run_command(cmd, timeout=600, cwd="."):
     try:
         out = proc.communicate(timeout=timeout)
     except subprocess.TimeoutExpired:
-        proc.kill()
         out = proc.communicate()
+        pid = proc.pid
+        if os.name == 'nt':
+            procKill = subprocess.Popen(['taskkill', '/F', '/T', '/PID', str(pid)], shell=True)
+            procKill.wait()
+        # Linux
+        else:
+            procKill = subprocess.Popen('pkill -TERM -P '+ str(pid), shell=True)
+            procKill.wait()
         is_timeout = True
     except:
         print_debug("ERROR: The child (%s) raised an exception: %s\n" % (arg_list, sys.exc_info()[1]), s, run_tests_log)
