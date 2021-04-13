@@ -1,0 +1,60 @@
+FROM centos:7
+MAINTAINER Dmitry Babokin <dmitry.y.babokin@intel.com>
+
+ARG REPO=ispc/ispc
+ARG SHA=main
+ARG LLVM_VERSION=11.1
+ARG EXTRA_BUILD_ARG=
+
+# !!! Make sure that your docker config provides enough memory to the container,
+# otherwise LLVM build may fail, as it will use all the cores available to container.
+
+# Packages required to build ISPC and Clang.
+RUN yum -y update; yum -y install centos-release-scl epel-release; yum clean all
+RUN yum install -y vim wget yum-utils gcc gcc-c++ git python3 m4 bison flex patch make ncurses-devel glibc-devel.x86_64 glibc-devel.i686 xz devtoolset-7 && \
+    yum install -y libtool autopoint gettext-devel texinfo help2man && \
+    yum clean -y all
+
+# These packages are required if you need to link IPSC with -static.
+RUN yum install -y ncurses-static libstdc++-static && \
+    yum clean -y all
+
+# Download and install required version of cmake (3.14) for ISPC build
+RUN wget -q --retry-connrefused --waitretry=5 --read-timeout=20 --timeout=15 -t 5 https://cmake.org/files/v3.14/cmake-3.14.0-Linux-x86_64.sh && mkdir /opt/cmake && sh cmake-3.14.0-Linux-x86_64.sh --prefix=/opt/cmake --skip-license && \
+    ln -s /opt/cmake/bin/cmake /usr/local/bin/cmake && rm cmake-3.14.0-Linux-x86_64.sh
+
+# If you are behind a proxy, you need to configure git.
+#RUN [ -n $http_proxy ] && git config --global --add http.proxy $http_proxy
+
+WORKDIR /usr/local/src
+
+# Fork ispc on github and clone *your* fork.
+RUN git clone https://github.com/$REPO.git ispc
+RUN cd ispc && git checkout $SHA && cd ..
+
+# This is home for Clang builds
+RUN mkdir /usr/local/src/llvm
+
+ENV ISPC_HOME=/usr/local/src/ispc
+ENV LLVM_HOME=/usr/local/src/llvm
+
+# If you are going to run test for future platforms, go to
+# http://www.intel.com/software/sde and download the latest version,
+# extract it, add to path and set SDE_HOME.
+
+WORKDIR /usr/local/src/ispc
+
+# Build Clang with all required patches.
+# Pass required LLVM_VERSION with --build-arg LLVM_VERSION=<version>.
+# By default 11.1 is used.
+# Note self-build options, it's required to build clang and ispc with the same compiler,
+# i.e. if clang was built by gcc, you may need to use gcc to build ispc (i.e. run "make gcc"),
+# or better do clang selfbuild and use it for ispc build as well (i.e. just "make").
+# "rm" are just to keep docker image small.
+RUN source /opt/rh/devtoolset-7/enable && \
+    ./alloy.py -b --version=$LLVM_VERSION --selfbuild --verbose $EXTRA_BUILD_ARG && \
+    rm -rf $LLVM_HOME/build-$LLVM_VERSION $LLVM_HOME/llvm-$LLVM_VERSION $LLVM_HOME/bin-"$LLVM_VERSION"_temp $LLVM_HOME/build-"$LLVM_VERSION"_temp
+
+ENV PATH=$LLVM_HOME/bin-$LLVM_VERSION/bin:$PATH
+
+

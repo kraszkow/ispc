@@ -28,22 +28,22 @@ jobs:
 
     - name: Build LLVM
       run: |
-        cd docker/ubuntu/llvm_build
-        docker build --tag ispc/ubuntu16.04 --build-arg REPO=$GITHUB_REPOSITORY --build-arg SHA=$GITHUB_SHA --build-arg LLVM_VERSION=11.1 .
+        cd docker/centos7/llvm_build
+        docker build --tag ispc/centos7 --build-arg REPO=$GITHUB_REPOSITORY --build-arg SHA=$GITHUB_SHA --build-arg LLVM_VERSION=11.1 .
 
     - name: Pack LLVM
       run: |
-        cd docker/ubuntu/llvm_build
-        docker run ispc/ubuntu16.04
+        cd docker/centos7/llvm_build
+        docker run ispc/centos7
         export CONTAINER=`docker ps --all |head -2 |tail -1 |awk '//{print $1}'`
         sudo docker cp $CONTAINER:/usr/local/src/llvm/bin-11.1 .
-        tar cJvf llvm-11.1.0-ubuntu16.04-Release+Asserts-x86.arm.wasm.tar.xz bin-11.1
+        tar cJvf llvm-11.1.0-centos7-Release+Asserts-x86.arm.wasm.tar.xz bin-11.1
 
     - name: Upload package
       uses: actions/upload-artifact@v2
       with:
         name: llvm11_linux
-        path: docker/ubuntu/llvm_build/llvm-11.1.0-ubuntu16.04-Release+Asserts-x86.arm.wasm.tar.xz
+        path: docker/centos7/llvm_build/llvm-11.1.0-centos7-Release+Asserts-x86.arm.wasm.tar.xz
 
   linux-build-release:
     runs-on: ubuntu-latest
@@ -59,22 +59,22 @@ jobs:
 
     - name: Build LLVM
       run: |
-        cd docker/ubuntu/llvm_build
-        docker build --tag ispc/ubuntu16.04 --build-arg REPO=$GITHUB_REPOSITORY --build-arg SHA=$GITHUB_SHA --build-arg LLVM_VERSION=11.1 --build-arg EXTRA_BUILD_ARG="--llvm-disable-assertions" .
+        cd docker/centos7/llvm_build
+        docker build --tag ispc/centos7 --build-arg REPO=$GITHUB_REPOSITORY --build-arg SHA=$GITHUB_SHA --build-arg LLVM_VERSION=11.1 --build-arg EXTRA_BUILD_ARG="--llvm-disable-assertions" .
 
     - name: Pack LLVM
       run: |
-        cd docker/ubuntu/llvm_build
-        docker run ispc/ubuntu16.04
+        cd docker/centos7/llvm_build
+        docker run ispc/centos7
         export CONTAINER=`docker ps --all |head -2 |tail -1 |awk '//{print $1}'`
         sudo docker cp $CONTAINER:/usr/local/src/llvm/bin-11.1 .
-        tar cJvf llvm-11.1.0-ubuntu16.04-Release-x86.arm.wasm.tar.xz bin-11.1
+        tar cJvf llvm-11.1.0-centos7-Release-x86.arm.wasm.tar.xz bin-11.1
 
     - name: Upload package
       uses: actions/upload-artifact@v2
       with:
         name: llvm11rel_linux
-        path: docker/ubuntu/llvm_build/llvm-11.1.0-ubuntu16.04-Release-x86.arm.wasm.tar.xz
+        path: docker/centos7/llvm_build/llvm-11.1.0-centos7-Release-x86.arm.wasm.tar.xz
 
   win-build:
     runs-on: windows-latest
