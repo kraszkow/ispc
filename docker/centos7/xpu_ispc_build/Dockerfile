@@ -1,12 +1,12 @@
 FROM centos:7
 MAINTAINER Dmitry Babokin <dmitry.y.babokin@intel.com>
 
-ARG REPO=ispc/ispc
-ARG SHA=main
 ARG LLVM_VERSION=11.1
 ARG L0L_VER=1.2.3
 ARG VC_INTRINSICS_COMMIT_SHA="d547de9478277e14896fa6418f6bb07ac07d7a1b"
 ARG SPIRV_TRANSLATOR_COMMIT_SHA="bea47b3d7528b8be7da88943d884cdb8d045e8a0"
+
+COPY ./ispc_copy /usr/local/src/ispc
 
 # !!! Make sure that your docker config provides enough memory to the container,
 # otherwise LLVM build may fail, as it will use all the cores available to container.
@@ -25,14 +25,7 @@ RUN yum install -y ncurses-static libstdc++-static && \
 RUN wget -q --retry-connrefused --waitretry=5 --read-timeout=20 --timeout=15 -t 5 https://cmake.org/files/v3.14/cmake-3.14.0-Linux-x86_64.sh && mkdir /opt/cmake && sh cmake-3.14.0-Linux-x86_64.sh --prefix=/opt/cmake --skip-license && \
     ln -s /opt/cmake/bin/cmake /usr/local/bin/cmake && rm cmake-3.14.0-Linux-x86_64.sh
 
-# If you are behind a proxy, you need to configure git.
-RUN [ -n $http_proxy ] && git config --global --add http.proxy $http_proxy
-
 WORKDIR /usr/local/src
-
-# Fork ispc on github and clone *your* fork.
-RUN git clone https://github.com/$REPO.git ispc
-RUN cd ispc && git checkout $SHA && cd ..
 
 # This is home for Clang builds
 RUN mkdir /usr/local/src/llvm
@@ -45,18 +38,9 @@ ENV GENX_DEPS=/usr/local/deps
 # http://www.intel.com/software/sde and download the latest version,
 # extract it, add to path and set SDE_HOME.
 
-WORKDIR /usr/local/src/ispc
+WORKDIR /usr/local/src/llvm
 
-# Build Clang with all required patches.
-# Pass required LLVM_VERSION with --build-arg LLVM_VERSION=<version>.
-# By default 11.1 is used.
-# Note self-build options, it's required to build clang and ispc with the same compiler,
-# i.e. if clang was built by gcc, you may need to use gcc to build ispc (i.e. run "make gcc"),
-# or better do clang selfbuild and use it for ispc build as well (i.e. just "make").
-# "rm" are just to keep docker image small.
-RUN source /opt/rh/devtoolset-7/enable && \
-    ./alloy.py -b --version=$LLVM_VERSION --selfbuild --llvm-disable-assertions && \
-    rm -rf $LLVM_HOME/build-$LLVM_VERSION $LLVM_HOME/llvm-$LLVM_VERSION $LLVM_HOME/bin-"$LLVM_VERSION"_temp $LLVM_HOME/build-"$LLVM_VERSION"_temp
+RUN wget -qO- --retry-connrefused --waitretry=5 --read-timeout=20 --timeout=15 -t 5 https://github.com/ispc/llvm-project/releases/download/llvm-11.1-ispc-dev/llvm-11.1.0-centos7-Release-x86.arm.wasm.tar.xz | tar -xvJ
 
 ENV PATH=$LLVM_HOME/bin-$LLVM_VERSION/bin:$PATH
 
@@ -100,3 +84,7 @@ ENV LD_LIBRARY_PATH=$LLVM_HOME/bin-$LLVM_VERSION/lib:$LD_LIBRARY_PATH
 RUN mkdir build
 WORKDIR /usr/local/src/ispc/build
 RUN cmake .. -DISPC_PREPARE_PACKAGE=ON -DISPC_CROSS=ON -DGENX_ENABLED=ON -DGENX_DEPS_DIR=$GENX_DEPS && make -j8 package
+
+RUN bin/check_isa
+RUN bin/ispc --support-matrix
+RUN cmake --build . --target check-all
