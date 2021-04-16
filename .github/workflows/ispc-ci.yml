@@ -58,52 +58,31 @@ jobs:
         $RUN_SMOKE && echo "::set-output name=optsets::${OPTSETS_SMOKE}" || true
         $RUN_FULL &&  echo "::set-output name=optsets::${OPTSETS_FULL}" || true
 
-  linux-build-ispc-llvm10:
-    needs: [define-flow]
-    #if: ${{ needs.define-flow.outputs.flow_type == 'full' }}
-    runs-on: ubuntu-latest
-    env:
-      LLVM_VERSION: "10.0"
-      LLVM_TAR: llvm-10.0.1-ubuntu16.04-Release+Asserts-x86.arm.wasm.tar.xz
-
-    steps:
-    - uses: actions/checkout@v2
-      with:
-        submodules: true
-
-    - name: Install dependencies
-      run: |
-        .github/workflows/scripts/install-build-deps.sh
-
-    - name: Check environment
-      run: |
-        ./check_env.py
-        which -a clang
-        cat /proc/cpuinfo
-
-    - name: Build package
-      run: |
-        .github/workflows/scripts/build-ispc.sh
-
-    - name: Sanity testing (make check-all, make test)
-      run: |
-        .github/workflows/scripts/check-ispc.sh
-
-    - name: Upload package
-      uses: actions/upload-artifact@v2
-      with:
-        name: ispc_llvm10_linux
-        path: build/ispc-trunk-linux.tar.gz
-
-
   linux-build-ispc-llvm11:
     needs: [define-flow]
     runs-on: ubuntu-latest
+    container: centos:7
     env:
       LLVM_VERSION: "11.1"
-      LLVM_TAR: llvm-11.1.0-ubuntu16.04-Release+Asserts-x86.arm.wasm.tar.xz
+      LLVM_TAR: llvm-11.1.0-centos7-Release-x86.arm.wasm.tar.xz
+
+      L0L_VER: 1.2.3
+      VC_INTRINSICS_COMMIT_SHA: "d547de9478277e14896fa6418f6bb07ac07d7a1b"
+      SPIRV_TRANSLATOR_COMMIT_SHA: "bea47b3d7528b8be7da88943d884cdb8d045e8a0"
+      ISPC_HOME: /usr/local/src/ispc
+      LLVM_HOME: /usr/local/src/llvm
+      GENX_DEPS: /usr/local/deps
 
     steps:
+
+    # Centos7 docker image don't have any git
+    # which is required do to repo checkout in next step.
+    - name: Install git package
+      run: |
+        # Standard Centos7 packages is git 1.8, GA requires min 2.18.
+        yum -y install https://packages.endpoint.com/rhel/7/os/x86_64/endpoint-repo-1.7-1.x86_64.rpm
+        yum install git -y
+
     - uses: actions/checkout@v2
       with:
         submodules: true
@@ -132,46 +111,6 @@ jobs:
         name: ispc_llvm11_linux
         path: build/ispc-trunk-linux.tar.gz
 
-  linux-test-llvm10:
-    needs: [define-flow, linux-build-ispc-llvm10]
-    runs-on: ubuntu-latest
-    continue-on-error: false
-    strategy:
-      fail-fast: false
-      matrix:
-        target: ${{fromJson(needs.define-flow.outputs.tests_matrix_targets)}}
-    steps:
-    - uses: actions/checkout@v2
-    - name: Download package
-      uses: actions/download-artifact@v2
-      with:
-        name: ispc_llvm10_linux
-
-    - name: Install dependencies and unpack artifacts
-      run: |
-        .github/workflows/scripts/install-test-deps.sh
-
-    - name: Check environment
-      run: |
-        cat /proc/cpuinfo
-
-    - name: Running tests
-      run: |
-        echo PATH=$PATH
-        ./alloy.py -r --only="stability current ${{ needs.define-flow.outputs.tests_optsets }}" --only-targets="${{ matrix.target }}" --time --update-errors=FP
-
-    - name: Check
-      run: |
-        # Print fails to the log.
-        git diff --exit-code
-
-    - name: Upload fail_db.txt
-      uses: actions/upload-artifact@v2
-      if: failure()
-      with:
-        name: fail_db.llvm10.${{matrix.target}}.txt
-        path: fail_db.txt
-
   linux-test-llvm11:
     needs: [define-flow, linux-build-ispc-llvm11]
     runs-on: ubuntu-latest
@@ -180,6 +119,7 @@ jobs:
       fail-fast: false
       matrix:
         target: ${{fromJson(needs.define-flow.outputs.tests_matrix_targets)}}
+
     steps:
     - uses: actions/checkout@v2
     - name: Download package
@@ -212,221 +152,4 @@ jobs:
         name: fail_db.llvm11.${{matrix.target}}.txt
         path: fail_db.txt
 
-  # Debug run is experimental with the purpose to see if it's capable to catch anything.
-  # So it's running in "full" mode only for now.
-  # Single target, as it should be representative enough.
-  linux-test-debug-llvm11:
-    needs: [define-flow, linux-build-ispc-llvm11]
-    if: ${{ needs.define-flow.outputs.flow_type == 'full' }}
-    runs-on: ubuntu-latest
-    continue-on-error: false
-    strategy:
-      fail-fast: false
-    steps:
-    - uses: actions/checkout@v2
-    - name: Download package
-      uses: actions/download-artifact@v2
-      with:
-        name: ispc_llvm11_linux
-
-    - name: Install dependencies and unpack artifacts
-      run: |
-        .github/workflows/scripts/install-test-deps.sh
-
-    - name: Check environment
-      run: |
-        cat /proc/cpuinfo
-
-    - name: Running tests
-      run: |
-        echo PATH=$PATH
-        ./alloy.py -r --only="stability current debug -O0 -O2" --only-targets="avx2-i32x8" --time --update-errors=FP
-
-    - name: Check
-      run: |
-        # Print fails to the log.
-        git diff --exit-code
-
-    - name: Upload fail_db.txt
-      uses: actions/upload-artifact@v2
-      if: failure()
-      with:
-        name: fail_db.llvm11.debug.txt
-        path: fail_db.txt
-
-  win-build-ispc-llvm10:
-    needs: [define-flow]
-    runs-on: windows-latest
-    env:
-      LLVM_VERSION: "10.0"
-      LLVM_TAR: llvm-10.0.1-win.vs2019-Release+Asserts-x86.arm.wasm.zip
-      LLVM_HOME: "C:\\projects\\llvm"
-      CROSS_TOOLS_GNUWIN32: "C:\\projects\\cross\\gnuwin32"
-      BUILD_TYPE: "Release"
-
-    steps:
-    - uses: actions/checkout@v2
-      with:
-        submodules: true
-
-    - name: Add msbuild to PATH
-      uses: microsoft/setup-msbuild@v1.0.2
-
-    - name: Install dependencies
-      run: |
-        .github/workflows/scripts/install-build-deps.ps1
-
-    - name: Check environment
-      shell: cmd
-      run: |
-        wmic cpu get caption, deviceid, name, numberofcores, maxclockspeed, status
-
-    - name: Build package
-      run: |
-        .github/workflows/scripts/build-ispc.ps1
-
-    - name: Sanity testing (make check-all, make test)
-      run: |
-        .github/workflows/scripts/check-ispc.ps1
-
-    - name: Upload package
-      uses: actions/upload-artifact@v2
-      with:
-        name: ispc_llvm10_win
-        path: build/ispc-trunk-windows.msi
-
-  win-build-ispc-llvm11:
-    needs: [define-flow]
-    runs-on: windows-latest
-    env:
-      LLVM_VERSION: "11.1"
-      LLVM_TAR: llvm-11.1.0-win.vs2019-Release+Asserts-x86.arm.wasm.7z
-      LLVM_HOME: "C:\\projects\\llvm"
-      CROSS_TOOLS_GNUWIN32: "C:\\projects\\cross\\gnuwin32"
-      BUILD_TYPE: "Release"
-
-    steps:
-    - uses: actions/checkout@v2
-      with:
-        submodules: true
-
-    - name: Add msbuild to PATH
-      uses: microsoft/setup-msbuild@v1.0.2
-
-    - name: Install dependencies
-      run: |
-        .github/workflows/scripts/install-build-deps.ps1
-
-    - name: Check environment
-      shell: cmd
-      run: |
-        wmic cpu get caption, deviceid, name, numberofcores, maxclockspeed, status
-
-    - name: Build package
-      run: |
-        .github/workflows/scripts/build-ispc.ps1
-
-    - name: Sanity testing (make check-all, make test)
-      run: |
-        .github/workflows/scripts/check-ispc.ps1
-
-    - name: Upload package
-      uses: actions/upload-artifact@v2
-      with:
-        name: ispc_llvm11_win
-        path: build/ispc-trunk-windows.msi
-
-
-  win-test-llvm10:
-    needs: [define-flow, win-build-ispc-llvm10]
-    runs-on: windows-latest
-    env:
-      LLVM_HOME: "C:\\projects\\llvm"
-    continue-on-error: false
-    strategy:
-      fail-fast: false
-      matrix:
-        arch: [x86, x86-64]
-        target: ${{fromJson(needs.define-flow.outputs.tests_matrix_targets)}}
-
-    steps:
-    - uses: actions/checkout@v2
-    - name: Download package
-      uses: actions/download-artifact@v2
-      with:
-        name: ispc_llvm10_win
-
-    - name: Install dependencies
-      run: |
-        .github/workflows/scripts/install-test-deps.ps1
-
-    - name: Check environment
-      shell: cmd
-      run: |
-        wmic cpu get caption, deviceid, name, numberofcores, maxclockspeed, status
-
-    - name: Running tests
-      run: |
-        $env:ISPC_HOME = "$pwd"
-        .github/workflows/scripts/load-vs-env.ps1 "${{ matrix.arch }}"
-        python .\alloy.py -r --only="stability ${{ matrix.arch }} current ${{ needs.define-flow.outputs.tests_optsets }}" --only-targets="${{ matrix.target }}" --time --update-errors=FP
-
-    - name: Check
-      run: |
-        # Print fails to the log.
-        git diff --exit-code
-
-    - name: Upload fail_db.txt
-      uses: actions/upload-artifact@v2
-      if: failure()
-      with:
-        name: fail_db.llvm10.${{matrix.arch}}.${{matrix.target}}.txt
-        path: fail_db.txt
-
-
-  win-test-llvm11:
-    needs: [define-flow, win-build-ispc-llvm11]
-    env:
-      LLVM_HOME: "C:\\projects\\llvm"
-    runs-on: windows-latest
-    continue-on-error: false
-    strategy:
-      fail-fast: false
-      matrix:
-        arch: [x86, x86-64]
-        target: ${{fromJson(needs.define-flow.outputs.tests_matrix_targets)}}
-
-    steps:
-    - uses: actions/checkout@v2
-    - name: Download package
-      uses: actions/download-artifact@v2
-      with:
-        name: ispc_llvm11_win
-
-    - name: Install dependencies
-      run: |
-        .github/workflows/scripts/install-test-deps.ps1
-
-    - name: Check environment
-      shell: cmd
-      run: |
-        wmic cpu get caption, deviceid, name, numberofcores, maxclockspeed, status
-
-    - name: Running tests
-      run: |
-        $env:ISPC_HOME = "$pwd"
-        .github/workflows/scripts/load-vs-env.ps1 "${{ matrix.arch }}"
-        python .\alloy.py -r --only="stability ${{ matrix.arch }} current ${{ needs.define-flow.outputs.tests_optsets }}" --only-targets="${{ matrix.target }}" --time --update-errors=FP
-
-    - name: Check
-      run: |
-        # Print fails to the log.
-        git diff --exit-code
-
-    - name: Upload fail_db.txt
-      uses: actions/upload-artifact@v2
-      if: failure()
-      with:
-        name: fail_db.llvm11.${{matrix.arch}}.${{matrix.target}}.txt
-        path: fail_db.txt
 
